@@ -7,7 +7,7 @@ import java.util.*;
 public class TensorScalar implements ITensor {
 
     private final Number value;
-    private Double gradient = 0d;
+    private Float gradient = 0f;
 
     private BackPropagate backPropagateRun = () -> {
     };
@@ -24,7 +24,7 @@ public class TensorScalar implements ITensor {
     public TensorScalar(Object value) {
         tensorList = new ArrayList<>();
         if (value instanceof Number) {
-            this.value =((Number) value);
+            this.value = ((Number) value);
         } else if (value instanceof TensorScalar) {
             this.value = ((TensorScalar) value).value;
         } else {
@@ -37,17 +37,17 @@ public class TensorScalar implements ITensor {
         return new TensorScalar(gradient);
     }
 
-    public Double getValue() {
-        return  (this.value).doubleValue();
+    public Float getValue() {
+        return (this.value).floatValue();
     }
 
     @Override
     public ITensor add(ITensor iTensor) {
         if (iTensor instanceof TensorScalar tensorScalarleft) {
-            var result = new TensorScalar((Double) tensorScalarleft.getValue() + this.getValue(), this, tensorScalarleft);
+            var result = new TensorScalar((Float) tensorScalarleft.getValue() + this.getValue(), this, tensorScalarleft);
             result.backPropagateRun = () -> {
-                tensorScalarleft.gradient += (1.0 * result.gradient);
-                this.gradient += (1.0 * result.gradient);
+                tensorScalarleft.gradient += (1 * result.gradient);
+                this.gradient += (1 * result.gradient);
             };
             return result;
         } else if (iTensor instanceof TensorVector tensorVector) {
@@ -70,8 +70,8 @@ public class TensorScalar implements ITensor {
         if (iTensor instanceof TensorScalar tensorScalarleft) {
             var result = new TensorScalar(this.getValue() - tensorScalarleft.getValue(), this, tensorScalarleft);
             result.backPropagateRun = () -> {
-                tensorScalarleft.gradient -= (1.0 * result.gradient);
-                this.gradient += (1.0 * result.gradient);
+                tensorScalarleft.gradient -= (1 * result.gradient);
+                this.gradient += (1 * result.gradient);
             };
             return result;
         } else if (iTensor instanceof TensorVector tensorVector) {
@@ -100,12 +100,12 @@ public class TensorScalar implements ITensor {
 
     @Override
     public ITensor pow(Number exp) {
-        Double doubleExp = exp.doubleValue();
+        Float doubleExp = exp.floatValue();
         var baseValue = this.getValue();
         var resultValue = Math.pow(baseValue, doubleExp);
         var result = new TensorScalar(resultValue, this, null);
         result.backPropagateRun = () -> {
-            this.gradient += (doubleExp * Math.pow(baseValue, doubleExp) - 1) * result.gradient;
+            this.gradient += (doubleExp * (float) Math.pow(baseValue, doubleExp) - 1) * result.gradient;
         };
         return result;
     }
@@ -135,7 +135,7 @@ public class TensorScalar implements ITensor {
     @Override
     public void backPropagate() {
         List<TensorScalar> tensors = new ArrayList<>();
-        this.gradient = 1d;
+        this.gradient = 1f;
         topologicalSort(tensors, new HashSet<>(), this);
         Collections.reverse(tensors);
         for (var child : tensors) {
@@ -145,6 +145,6 @@ public class TensorScalar implements ITensor {
 
     @Override
     public Object getData() {
-        return (this.value).doubleValue();
+        return (this.value).floatValue();
     }
 }

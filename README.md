@@ -37,7 +37,7 @@ import org.jarvis.*;
 public class Main {
     public static void main(String[] args) {
         // Initialize a 2D tensor
-        Double[][] matrix = {{1, 2}, {3, 4}};
+        Float[][] matrix = {{1, 2}, {3, 4}};
         TensorVector tensor = new TensorVector(matrix);
         
         // Initialize a scalar
@@ -60,7 +60,7 @@ import org.jarvis.TensorScalar;
 
 public class Main {
     public static void main(String[] args) {
-        Double[][] matrix1 = {{1, 2}, {3, 4}};
+        Float[][] matrix1 = {{1, 2}, {3, 4}};
 
         ITensor tensor1 = new TensorVector(matrix1);
         ITensor tensor2 = new TensorScalar(3.4);
