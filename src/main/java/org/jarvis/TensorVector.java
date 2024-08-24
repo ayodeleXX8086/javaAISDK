@@ -1,7 +1,7 @@
 package org.jarvis;
 
-import jdk.incubator.vector.DoubleVector;
 import jdk.incubator.vector.FloatVector;
+import jdk.incubator.vector.VectorSpecies;
 import org.jarvis.exceptions.JarvisRuntimeException;
 
 import java.lang.reflect.Array;
@@ -9,50 +9,57 @@ import java.util.*;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
-import java.util.stream.Collectors;
-import java.util.stream.DoubleStream;
 
 public class TensorVector implements ITensor {
 
+    @FunctionalInterface
+    interface InnerBackpropagation {
+
+        void apply(TensorVector tensorVector1, TensorVector tensorVector2, TensorVector result);
+    }
+
+    private static final VectorSpecies<Float> SPECIES = FloatVector.SPECIES_PREFERRED;
+
     private final Integer[] sizes;
     private final float[] matrix;
-
-    private final Map<Object, Object> cache;
+    private float[] gradientMatrix = new float[]{};
     private final String tensorId;
     private final Integer totalSize;
 
     private final StringBuilder optimizedToString;
-    private final List<TensorVector> gradients;
+    private final StringBuilder optimizedToStringGradient;
+    private final List<TensorVector> dependencies;
 
     private BackPropagate backPropagateRun = () -> {
     };
 
 
     // Common constructor that all other constructors delegate to
-    private TensorVector(float[] matrix, Integer[] sizes, List<TensorVector> gradients, boolean flattenSize) {
+    private TensorVector(float[] matrix, Integer[] sizes, float[] gradientMatrix, List<TensorVector> dependencies) {
         this.sizes = sizes;
         this.totalSize = reduceMultiple(this.sizes);
         this.matrix = matrix;
         this.optimizedToString = new StringBuilder();
+        this.optimizedToStringGradient = new StringBuilder();
         this.tensorId = UUID.randomUUID().toString();
-        this.cache = new HashMap<>();
-        this.gradients = gradients;
+        this.dependencies = dependencies;
+        this.gradientMatrix = gradientMatrix;
     }
 
     // Constructor 1: Uses default sizes
     public TensorVector(Object matrix) {
 
-        this(initializeMatrix(matrix, reduceMultiple(getSizes(matrix))), getSizes(matrix), new ArrayList<>(), true);
+        this(initializeMatrix(matrix, reduceMultiple(getSizes(matrix))), getSizes(matrix), new float[reduceMultiple(getSizes(matrix))], new ArrayList<>());
     }
 
     // Constructor 2: Uses provided sizes
     public TensorVector(float[] matrix, Integer[] sizes) {
-        this(matrix, sizes, new ArrayList<>(), false);
+        this(matrix, sizes, new float[]{}, new ArrayList<>());
     }
 
     // Constructor 3: Uses provided sizes and gradients
-    public TensorVector(float[] matrix, Integer[] sizes, TensorVector... gradients) {
-        this(matrix, sizes, Arrays.asList(gradients), false);
+    public TensorVector(float[] matrix, Integer[] sizes, float[] gradientMatrix, TensorVector... dependencies) {
+        this(matrix, sizes, gradientMatrix, Arrays.asList(dependencies));
     }
 
     static Integer reduceMultiple(Integer[] sizes) {
@@ -64,18 +71,18 @@ public class TensorVector implements ITensor {
         if (index >= targetSize.length) return arr;
         var originalSizeCurr = index < originalSize.length ? originalSize[index] : 1;
         var targetSizeCurr = targetSize[index];
+        List<Float> curr;
         if (originalSizeCurr != targetSizeCurr) {
-            List<Float> curr = new ArrayList<>();
+            curr = new ArrayList<>();
             for (int i = 0; i < arr.size(); i += prev) {
                 for (int j = 0; j < targetSizeCurr; j++) {
                     curr.addAll(arr.subList(i, Math.min(i + prev, arr.size())));
                 }
             }
-            return stretchBroadcast(curr, index + 1, prev * targetSizeCurr, originalSize, targetSize);
         } else {
-            List<Float> curr = new ArrayList<>(arr);
-            return stretchBroadcast(curr, index + 1, prev * targetSizeCurr, originalSize, targetSize);
+            curr = new ArrayList<>(arr);
         }
+        return stretchBroadcast(curr, index + 1, prev * targetSizeCurr, originalSize, targetSize);
     }
 
     public static <T> T[] invertArray(T[] array, Class<T> tClass) {
@@ -89,8 +96,7 @@ public class TensorVector implements ITensor {
     // Stretching method for broadcasting
     private static float[] stretch(float[] values, Integer[] originalSize, Integer[] targetSize) {
         List<Float> arr = new ArrayList<>();
-        for (float value :
-                values) {
+        for (float value : values) {
             arr.add(value);
         }
 
@@ -99,7 +105,7 @@ public class TensorVector implements ITensor {
         var arr1 = stretchBroadcast(arr, 0, 1, invertOriginal, invertTarget);
         float[] result = new float[arr1.size()];
         AtomicInteger atomicInteger = new AtomicInteger();
-        arr1.stream().forEach(e -> {
+        arr1.forEach(e -> {
             result[atomicInteger.getAndIncrement()] = e;
         });
         return result;
@@ -266,6 +272,23 @@ public class TensorVector implements ITensor {
         return result;
     }
 
+    public Integer[] compressShape(Integer[] shape1, Integer[] shape2) {
+        int len1 = shape1.length;
+        int len2 = shape2.length;
+        int maxLength = Math.max(len1, len2);
+        Integer[] result = new Integer[maxLength];
+
+        for (int i = 0; i < maxLength; i++) {
+            int dim1 = i < len1 ? shape1[len1 - 1 - i] : 1;
+            int dim2 = i < len2 ? shape2[len2 - 1 - i] : 1;
+            if (dim1 != dim2 && dim1 != 1 && dim2 != 1) {
+                throw new IllegalArgumentException("Shapes are not broadcastable");
+            }
+            result[maxLength - 1 - i] = Math.min(dim1, dim2);
+        }
+        return result;
+    }
+
     private List<Integer[]> createPairs(Integer[] arr) {
         return createPairs(Arrays.stream(arr).mapToInt(i -> i).toArray());
     }
@@ -278,6 +301,11 @@ public class TensorVector implements ITensor {
             array = java.lang.reflect.Array.get(array, indices[i]);
         }
         java.lang.reflect.Array.set(array, indices[indices.length - 1], value);
+    }
+
+    @Override
+    public ITensor neg() {
+        return new TensorVector(new float[]{-1}).multiply(this);
     }
 
     @SuppressWarnings("unchecked")
@@ -337,17 +365,16 @@ public class TensorVector implements ITensor {
         }
     }
 
-
     @Override
-    public ITensor getGradient() {
-        return null;
+    public Object getGradient() {
+        return gradientMatrix;
     }
 
     public Integer[] getSizes() {
         return sizes;
     }
 
-    private ITensor elementWiseOperation(Object a, Object b, BiFunction<FloatVector, FloatVector, FloatVector> operationVector, BiFunction<Float, Float, Float> operationScalar, TensorOperation operation) {
+    private ITensor elementWiseOperation(Object a, Object b, BiFunction<FloatVector, FloatVector, FloatVector> operationVector, BiFunction<Float, Float, Float> operationScalar, TensorOperation operation, InnerBackpropagation innerBackpropagation) {
         if ((a instanceof TensorVector) && (b instanceof TensorVector)) {
             TensorVector tv1 = (TensorVector) a;
             TensorVector tv2 = (TensorVector) b;
@@ -360,67 +387,103 @@ public class TensorVector implements ITensor {
             float[] stretchedA = stretch(tv1.matrix, tv1.sizes, resultShape);
             float[] stretchedB = stretch(tv2.matrix, tv2.sizes, resultShape);
 
-            float[] result = new float[reduceMultiple(resultShape)];
+            var newLength = reduceMultiple(resultShape);
+            float[] result = new float[newLength];
             int threshold = 10_000;
             try (ForkJoinPool pool = new ForkJoinPool()) {
                 pool.invoke(new VectorTask(stretchedA, stretchedB, operationVector, operationScalar, result, 0, result.length, threshold));
             }
 
-            return new TensorVector(result, resultShape);
+            var resultObj = new TensorVector(result, resultShape, new float[newLength], tv1, tv2);
+            resultObj.backPropagateRun = () -> {
+                innerBackpropagation.apply(tv1, tv2, resultObj);
+            };
+            return resultObj;
         }
+
         throw new JarvisRuntimeException("Operation not supported " + a.getClass().getName() + " cannot perform " + operation.getOperationName() + " operation on " + b.getClass().getName());
     }
 
     @Override
     public ITensor add(ITensor iTensor) {
-        return this.executeOperation(iTensor, FloatVector::add, (o1, o2) -> o1 + o2, TensorOperation.Addition);
+        iTensor = iTensor instanceof TensorScalar ? new TensorVector(new float[]{(float) iTensor.getData()}) : iTensor;
+        InnerBackpropagation backPropagate = (t1, t2, result) -> {
+            var smallSizeGradient = t1.gradientMatrix.length > t2.gradientMatrix.length ? t2.gradientMatrix : t1.gradientMatrix;
+            var largestSizeGradient = t1.gradientMatrix.length > t2.gradientMatrix.length ? t1.gradientMatrix : t2.gradientMatrix;
+            for (int i = 0; i < result.gradientMatrix.length; i++) {
+                int indexA = i % t1.matrix.length;  // Index into the original `a` shape
+                int indexB = i;  // Index into the `b` tensor
+
+                smallSizeGradient[indexA] += result.gradientMatrix[i];
+
+                largestSizeGradient[indexB] += result.gradientMatrix[i];
+            }
+        };
+        return this.executeOperation(iTensor, FloatVector::add, (o1, o2) -> o1 + o2, TensorOperation.Addition, backPropagate);
     }
 
     @Override
     public ITensor subtract(ITensor iTensor) {
-        return this.executeOperation(iTensor, FloatVector::sub, (o1, o2) -> o1 - o2, TensorOperation.Subtraction);
+        return this.add(iTensor.neg());
     }
 
     @Override
     public ITensor divide(ITensor iTensor) {
-        return this.executeOperation(iTensor, FloatVector::div, (o1, o2) -> o1 / o2, TensorOperation.Division);
+        return this.multiply(iTensor.pow(-1));
     }
 
     @Override
     public ITensor multiply(ITensor iTensor) {
-        return this.executeOperation(iTensor, FloatVector::mul, (o1, o2) -> o1 * o2, TensorOperation.Multiplication);
+        iTensor = iTensor instanceof TensorScalar ? new TensorVector(new float[]{(float) iTensor.getData()}) : iTensor;
+
+        InnerBackpropagation backPropagate = (t1, t2, result) -> {
+            var smallSizeGradient = t1.gradientMatrix.length > t2.gradientMatrix.length ? t2.gradientMatrix : t1.gradientMatrix;
+            var largestSizeGradient = t1.gradientMatrix.length > t2.gradientMatrix.length ? t1.gradientMatrix : t2.gradientMatrix;
+            for (int i = 0; i < result.gradientMatrix.length; i++) {
+                smallSizeGradient[i % t1.sizes[0]] += largestSizeGradient[i] * result.gradientMatrix[i];
+                largestSizeGradient[i] += smallSizeGradient[i % t1.sizes[0]] * result.gradientMatrix[i];
+            }
+
+        };
+
+        return this.executeOperation(iTensor, FloatVector::mul, (o1, o2) -> o1 * o2, TensorOperation.Multiplication, backPropagate);
     }
+
 
     @Override
     public ITensor pow(Number exp) {
         return executeOperation(this, exp);
     }
 
-    ITensor executeOperation(Object operand, Number exp) {
-        if (operand instanceof TensorVector || operand.getClass().isArray()) {
-            Object arr = operand.getClass().isArray() ? operand : ((TensorVector) operand).matrix;
-            int len = Array.getLength(arr);
-            Object result = Array.newInstance(Object.class, len);
-            for (int i = 0; i < len; i++) {
-                var selectedElement = Array.get(arr, i);
-                Array.set(result, i, executeOperation(selectedElement, exp));
-            }
-            return new TensorVector(result);
-        } else if (operand instanceof TensorScalar tensorScalar) {
-            return tensorScalar.pow(exp);
+    ITensor executeOperation(TensorVector operand, Number exp) {
+        float[] resultArr = new float[operand.matrix.length];
+        int i = 0;
+        int upperBound = SPECIES.loopBound(operand.matrix.length);
+        for (; i < upperBound; i += SPECIES.length()) {
+            var v1 = FloatVector.fromArray(SPECIES, operand.matrix, i);
+            var result = v1.pow(exp.floatValue());
+            result.intoArray(resultArr, i);
         }
-        throw new JarvisRuntimeException("Operation cannot be performed on " + operand.getClass().getName());
+
+        for (; i < operand.matrix.length; i++) {
+            resultArr[i] = (float) Math.pow(operand.matrix[i], exp.floatValue());
+        }
+        var result = new TensorVector(resultArr, operand.sizes, new float[operand.totalSize], this);
+        result.backPropagateRun = () -> {
+            int id = 0;
+            for (; id < operand.gradientMatrix.length; id++) {
+                this.gradientMatrix[id] += ((exp.floatValue() * Math.pow(this.matrix[id], exp.floatValue() - 1)) * this.gradientMatrix[id]);
+            }
+        };
+        return result;
     }
 
-    ITensor executeOperation(Object operand, BiFunction<FloatVector, FloatVector, FloatVector> operator, BiFunction<Float, Float, Float> operationScalar, TensorOperation operation) {
+    ITensor executeOperation(Object operand, BiFunction<FloatVector, FloatVector, FloatVector> operator, BiFunction<Float, Float, Float> operationScalar, TensorOperation operation, InnerBackpropagation innerBackpropagation) {
         if (operand instanceof TensorVector other) {
             if (!isValidBroadcast(this.sizes, other.sizes)) {
                 throw new IllegalArgumentException("Shapes are not broadcast " + operation.getOperationName());
             }
-            var result = elementWiseOperation(this, other, operator, operationScalar, operation);
-            return result;
-        } else if (operand instanceof TensorScalar) {
-            var result = elementWiseOperation(this.matrix, (ITensor) operand, operator, operationScalar, operation);
+            var result = elementWiseOperation(this, other, operator, operationScalar, operation, innerBackpropagation);
             return result;
         }
         throw new JarvisRuntimeException("Unsupported right operand");
@@ -444,9 +507,25 @@ public class TensorVector implements ITensor {
         }
     }
 
+    private void topologicalSort(List<TensorVector> tensorList, Set<String> seen, TensorVector node) {
+        if (node == null || seen.contains(node.tensorID())) {
+            return;
+        }
+        seen.add(node.tensorID());
+        for (TensorVector tensor : node.dependencies) {
+            topologicalSort(tensorList, seen, tensor);
+        }
+        tensorList.add(node);
+    }
+
     @Override
     public void backPropagate() {
-        TensorVector.runBackPropagate(matrix);
+        List<TensorVector> tensors = new ArrayList<>();
+        Arrays.fill(this.gradientMatrix, 1f);
+        topologicalSort(tensors, new HashSet<>(), this);
+        for (TensorVector tensorVector : tensors) {
+            tensorVector.backPropagateRun.apply();
+        }
     }
 
     @Override
@@ -454,8 +533,7 @@ public class TensorVector implements ITensor {
         return this.matrix;
     }
 
-
-    private String buildMatrixRepresentation(int idx, AtomicInteger atomicInteger) {
+    private String buildMatrixRepresentation(int idx, AtomicInteger atomicInteger, float[] matrix) {
         StringBuilder stringBuilder = new StringBuilder();
         var breakLine = "\n";
         var tabs = "\t".repeat(idx);
@@ -465,13 +543,13 @@ public class TensorVector implements ITensor {
         if (idx == this.sizes.length - 1) {
             List<String> lst = new ArrayList<>();
             for (int i = 0; i < this.sizes[idx]; i++) {
-                lst.add(String.format(" %.1f", (float) Array.get(this.matrix, atomicInteger.getAndIncrement())));
+                lst.add(String.format(" %.1f", (float) Array.get(matrix, atomicInteger.getAndIncrement())));
             }
             stringBuilder.append(String.join(", ", lst).strip());
             stringBuilder.append("]");
         } else {
             for (int i = 0; i < this.sizes[idx]; i++) {
-                stringBuilder.append(buildMatrixRepresentation(idx + 1, atomicInteger));
+                stringBuilder.append(buildMatrixRepresentation(idx + 1, atomicInteger, matrix));
                 if (i != this.sizes[idx] - 1) {
                     stringBuilder.append(",");
                 }
@@ -483,17 +561,20 @@ public class TensorVector implements ITensor {
 
     private String buildMatrixRepresentationOptimized() {
         if (this.optimizedToString.isEmpty()) {
-            this.optimizedToString.append(buildMatrixRepresentation(0, new AtomicInteger()));
+            this.optimizedToString.append(buildMatrixRepresentation(0, new AtomicInteger(), this.matrix));
         }
         return this.optimizedToString.toString();
     }
 
     @Override
     public String toString() {
-        return "TensorVector{" +
-                "matrix = " + buildMatrixRepresentationOptimized() +
-                ", tensorId='" + tensorId + '\'' +
-                ", shape=" + Arrays.toString(this.sizes) +
-                '}';
+        return "TensorVector{" + "matrix = " + buildMatrixRepresentationOptimized() + ", tensorId='" + tensorId + '\'' + ", shape=" + Arrays.toString(this.sizes) + '}';
+    }
+
+    public String toStringGradient() {
+        if (this.optimizedToStringGradient.isEmpty()) {
+            this.optimizedToStringGradient.append(buildMatrixRepresentation(0, new AtomicInteger(), this.gradientMatrix));
+        }
+        return this.optimizedToStringGradient.toString();
     }
 }

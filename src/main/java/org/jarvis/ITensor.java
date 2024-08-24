@@ -2,7 +2,7 @@ package org.jarvis;
 
 public interface ITensor {
 
-    public ITensor getGradient();
+    public Object getGradient();
 
     public ITensor add(ITensor iTensor);
 
@@ -14,9 +14,13 @@ public interface ITensor {
 
     public ITensor pow(Number exp);
 
+    public ITensor neg();
+
     public String tensorID();
 
     public void backPropagate();
 
     public Object getData();
+
+    public String toStringGradient();
 }

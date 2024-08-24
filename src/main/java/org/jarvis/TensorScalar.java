@@ -33,8 +33,8 @@ public class TensorScalar implements ITensor {
     }
 
     @Override
-    public ITensor getGradient() {
-        return new TensorScalar(gradient);
+    public Object getGradient() {
+        return gradient;
     }
 
     public Float getValue() {
@@ -51,7 +51,7 @@ public class TensorScalar implements ITensor {
             };
             return result;
         } else if (iTensor instanceof TensorVector tensorVector) {
-            return tensorVector.add(this);
+            return new TensorVector(new float[]{this.value.floatValue()}).add(tensorVector);
         }
 
         throw new JarvisRuntimeException("ITensor instance add operator is not implemented yet.");
@@ -66,33 +66,31 @@ public class TensorScalar implements ITensor {
     }
 
     @Override
+    public ITensor neg() {
+        return this.multiply(new TensorScalar(-1));
+    }
+
+    @Override
     public ITensor subtract(ITensor iTensor) {
-        if (iTensor instanceof TensorScalar tensorScalarleft) {
-            var result = new TensorScalar(this.getValue() - tensorScalarleft.getValue(), this, tensorScalarleft);
-            result.backPropagateRun = () -> {
-                tensorScalarleft.gradient -= (1 * result.gradient);
-                this.gradient += (1 * result.gradient);
-            };
-            return result;
+        if (iTensor instanceof TensorScalar tensorScalarRight) {
+            return this.add(tensorScalarRight.neg());
         } else if (iTensor instanceof TensorVector tensorVector) {
-            var negativeOne = new TensorScalar(-1.0);
-            var leftOperand = tensorVector.multiply(negativeOne);
-            return leftOperand.add(this);
+            return new TensorVector(new float[]{this.value.floatValue()}).subtract(tensorVector);
         }
         throw new JarvisRuntimeException("ITensor instance subtract operator is not implemented yet.");
     }
 
     @Override
     public ITensor multiply(ITensor iTensor) {
-        if ((iTensor instanceof TensorScalar tensorScalarleft)) {
-            var result = new TensorScalar(this.getValue() * tensorScalarleft.getValue(), this, tensorScalarleft);
+        if ((iTensor instanceof TensorScalar tensorScalarRight)) {
+            var result = new TensorScalar(this.getValue() * tensorScalarRight.getValue(), this, tensorScalarRight);
             result.backPropagateRun = () -> {
-                tensorScalarleft.gradient += this.getValue() * result.gradient;
-                this.gradient += tensorScalarleft.getValue() * result.gradient;
+                tensorScalarRight.gradient += this.getValue() * result.gradient;
+                this.gradient += tensorScalarRight.getValue() * result.gradient;
             };
             return result;
         } else if (iTensor instanceof TensorVector tensorVector) {
-            return tensorVector.multiply(this);
+            return new TensorVector(new float[]{this.value.floatValue()}).multiply(tensorVector);
         }
 
         throw new JarvisRuntimeException("ITensor instance multiply operator is not implemented yet.");
@@ -105,7 +103,7 @@ public class TensorScalar implements ITensor {
         var resultValue = Math.pow(baseValue, doubleExp);
         var result = new TensorScalar(resultValue, this, null);
         result.backPropagateRun = () -> {
-            this.gradient += (doubleExp * (float) Math.pow(baseValue, doubleExp) - 1) * result.gradient;
+            this.gradient += (doubleExp * (float) Math.pow(baseValue, doubleExp - 1)) * result.gradient;
         };
         return result;
     }
@@ -146,5 +144,9 @@ public class TensorScalar implements ITensor {
     @Override
     public Object getData() {
         return (this.value).floatValue();
+    }
+
+    public String toStringGradient() {
+        return this.gradient.toString();
     }
 }
