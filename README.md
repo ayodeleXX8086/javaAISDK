@@ -45,19 +45,19 @@ public class Main {
         
         // Element-wise addition
         ITensor resultAdd = tensor1.add(tensor2);
-        System.out.println("Addition Result: " + resultAdd.getData());
+        System.out.println("Addition Result: " + resultAdd);
         
         // Element-wise subtraction
         ITensor resultSubtract = tensor1.subtract(tensor2);
-        System.out.println("Subtraction Result: " + resultSubtract.getData());
+        System.out.println("Subtraction Result: " + resultSubtract);
         
         // Element-wise multiplication
         ITensor resultMultiply = tensor1.multiply(tensor2);
-        System.out.println("Multiplication Result: " + resultMultiply.getData());
+        System.out.println("Multiplication Result: " + resultMultiply);
         
         // Element-wise division
         ITensor resultDivide = tensor1.divide(tensor2);
-        System.out.println("Division Result: " + resultDivide.getData());
+        System.out.println("Division Result: " + resultDivide);
     }
 }
 ```
@@ -72,7 +72,7 @@ public class Main {
         
         // Slice the tensor
         ITensor slice = tensor.slice(new JarvisPairs(0, 2), new JarvisPairs(1, 3));
-        System.out.println("Sliced Tensor: " + slice.getData());
+        System.out.println("Sliced Tensor: " + slice);
     }
 }
 ```
