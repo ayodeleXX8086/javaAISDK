@@ -23,4 +23,6 @@ public interface ITensor {
     public Object getData();
 
     public String toStringGradient();
+
+    public void clearGradient();
 }

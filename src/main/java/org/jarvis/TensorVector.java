@@ -528,6 +528,16 @@ public class TensorVector implements ITensor {
         }
     }
 
+    public void clearGradient(){
+        List<TensorVector> tensors = new ArrayList<>();
+       Arrays.fill(this.gradientMatrix, 0f);
+        topologicalSort(tensors, new HashSet<>(), this);
+        Collections.reverse(tensors);
+        for (var child : tensors) {
+            Arrays.fill(child.gradientMatrix, 0f);
+        }
+    }
+
     @Override
     public Object getData() {
         return this.matrix;

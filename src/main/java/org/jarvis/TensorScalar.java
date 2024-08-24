@@ -141,6 +141,16 @@ public class TensorScalar implements ITensor {
         }
     }
 
+    public void clearGradient(){
+        List<TensorScalar> tensors = new ArrayList<>();
+        this.gradient = 0f;
+        topologicalSort(tensors, new HashSet<>(), this);
+        Collections.reverse(tensors);
+        for (var child : tensors) {
+            child.gradient = 0f;
+        }
+    }
+
     @Override
     public Object getData() {
         return (this.value).floatValue();
